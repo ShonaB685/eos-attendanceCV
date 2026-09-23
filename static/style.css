@@ -1,0 +1,604 @@
+@font-face {
+  font-family: "Inter";
+  src: url("fonts/InterVariable.woff2") format("woff2-variations"), url("fonts/InterVariable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --bg: #141416;
+  --text: #f2f2f3;
+  --muted: rgba(242, 242, 243, 0.48);
+  --muted-strong: rgba(242, 242, 243, 0.68);
+  --border: rgba(255, 255, 255, 0.1);
+  --surface-tint: rgba(255, 255, 255, 0.05);
+  --surface-tint-hover: rgba(255, 255, 255, 0.09);
+  --input-bg: rgba(255, 255, 255, 0.06);
+  --placeholder: rgba(242, 242, 243, 0.35);
+  /* One quiet accent, used sparingly (primary CTA, active nav, focus ring) --
+     no saturated blue/green/red button trio. */
+  --accent: #6b7686;
+  --accent-strong: #838fa0;
+  --green: #7c9c85;
+  --green-bg: rgba(124, 156, 133, 0.14);
+  --red: #b98080;
+  --red-bg: rgba(185, 128, 128, 0.14);
+  --gray-bg: rgba(255, 255, 255, 0.07);
+  --radius: 0;
+  --shadow: 0 10px 34px rgba(0, 0, 0, 0.45);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+}
+
+body {
+  font-family: "Inter", -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-feature-settings: "cv11", "ss01";
+  background: var(--bg);
+  color: var(--text);
+  margin: 0;
+  overflow: hidden;
+}
+
+#kinetic-grid {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.topnav {
+  position: relative;
+  z-index: 10;
+  background: rgba(22, 22, 24, 0.6);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.65rem 1.5rem;
+}
+
+.topnav .brand {
+  font-weight: 700;
+  font-size: 1.05rem;
+  margin-right: auto;
+  color: var(--text);
+}
+
+.topnav a {
+  color: var(--muted-strong);
+  text-decoration: none;
+  font-size: 0.92rem;
+  font-weight: 600;
+  padding: 0.4rem 0.7rem;
+  border-radius: 0;
+}
+
+.topnav a:hover { background: rgba(255, 255, 255, 0.07); color: var(--text); }
+.topnav a.active { color: var(--text); background: rgba(255, 255, 255, 0.09); }
+
+.page {
+  position: relative;
+  z-index: 10;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 0.75rem 1rem 1rem;
+}
+
+.page.wide { max-width: 1040px; }
+
+/* Centers whichever state card (form / capture) is currently visible in
+   the remaining space below the heading, instead of leaving it pinned to
+   the top with empty space underneath. */
+.state-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 50vh;
+}
+
+.state-area > .card {
+  width: 100%;
+  max-width: 480px;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  align-items: start;
+  gap: 1.25rem;
+}
+
+@media (max-width: 820px) {
+  .layout { grid-template-columns: 1fr; }
+}
+
+.results-card {
+  max-height: calc(100vh - 8rem);
+  overflow-y: auto;
+}
+
+/* Annotated capture(s) returned by /api/mark -- the backend already draws
+   a box + name/status label per detected face (green=matched, red=no
+   match, orange=spoof); this just surfaces those images in the UI instead
+   of discarding them. */
+.annotated-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.annotated-thumb {
+  width: 100%;
+  display: block;
+  border: 1px solid var(--border);
+}
+
+.results-card h2 {
+  font-size: 1.1rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  margin: 0 0 0.9rem;
+  color: var(--text);
+}
+
+/* Sits below the (already tall, centered) enrollment form on the Add
+   Student page rather than beside it -- a shorter cap than the default
+   .results-card so a long roster scrolls within itself instead of
+   pushing the page past 100vh (this page doesn't scroll). */
+.manage-card {
+  max-height: 24vh;
+  margin-top: 1rem;
+}
+
+.manage-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+.manage-actions button {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.85rem;
+  margin-left: 0.4rem;
+}
+
+/* Full-width row (not the centered .page column) so the badge sits flush
+   against the true left edge of the viewport, aligned with the nav brand. */
+.kicker-row {
+  position: relative;
+  z-index: 10;
+  padding: 0.85rem 1.5rem 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.clock {
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-strong);
+}
+
+/* Used on pages (like Add Student) where the heading sits above centered
+   content, so the badge + title line up with it instead of hugging the
+   left edge. */
+.heading-center {
+  text-align: center;
+  padding-top: 0.5rem;
+}
+.heading-center .kicker { margin-bottom: 0.6rem; }
+.heading-center h1 { margin-bottom: 0.4rem; }
+
+.kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 999px;
+  padding: 0.32rem 0.9rem 0.32rem 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--muted-strong);
+}
+
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--red);
+  flex-shrink: 0;
+  animation: live-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(185, 128, 128, 0.55); }
+  70% { box-shadow: 0 0 0 6px rgba(185, 128, 128, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(185, 128, 128, 0); }
+}
+
+h1 {
+  font-size: 1.55rem;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  margin: 0 0 0.85rem;
+  color: var(--text);
+}
+
+.card {
+  position: relative;
+  /* White card surface on the still-dark animated page background --
+     everything below re-derives from these local overrides, since every
+     descendant rule already reads color/surface values through the same
+     custom properties instead of hardcoding light-on-dark colors. */
+  --text: #17181b;
+  --muted: rgba(23, 24, 27, 0.5);
+  --muted-strong: rgba(23, 24, 27, 0.7);
+  --border: rgba(0, 0, 0, 0.1);
+  --gray-bg: rgba(0, 0, 0, 0.055);
+  --surface-tint: rgba(0, 0, 0, 0.035);
+  --surface-tint-hover: rgba(0, 0, 0, 0.07);
+  --input-bg: rgba(0, 0, 0, 0.035);
+  --placeholder: rgba(23, 24, 27, 0.35);
+  background: #ffffff;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+}
+
+/* Enrollment result: a terminal state, so center it over the whole page
+   like a confirmation dialog instead of leaving it pinned under the
+   heading where the capture card used to be. */
+#resultCard:not(:empty) {
+  position: fixed;
+  inset: 0;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(20, 20, 22, 0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+#resultCard .card {
+  width: 100%;
+  max-width: 440px;
+  margin-bottom: 0;
+}
+
+.card p.hint {
+  color: var(--muted);
+  font-size: 0.88rem;
+  margin: 0.25rem 0 0;
+}
+
+.video-wrap {
+  position: relative;
+}
+
+video {
+  width: 100%;
+  max-height: 42vh;
+  object-fit: cover;
+  border-radius: var(--radius);
+  background: #000;
+  display: block;
+}
+
+/* Sized to the video's native pixel dimensions (see JS) and given the same
+   object-fit: cover -- the browser then crops/scales this identically to
+   the video underneath, so boxes drawn in the canvas's native pixel space
+   land in the right spot without any manual scale math. */
+.overlay-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-height: 42vh;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+canvas.frame {
+  width: 100%;
+  border-radius: var(--radius);
+  background: #000;
+  display: block;
+}
+
+#thumbs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 0.9rem;
+}
+
+#thumbs img {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 0;
+  border: 1px solid var(--border);
+}
+
+.btns {
+  display: flex;
+  gap: 0.6rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+button {
+  padding: 0.6rem 1.15rem;
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* One solid, muted-accent button per screen for the main action. */
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:not(:disabled):hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+
+/* Everything else is outline/ghost, differentiated by label and a faint
+   tint rather than a saturated fill. */
+button.success,
+button.neutral {
+  background: var(--surface-tint);
+  border-color: var(--border);
+  color: var(--text);
+}
+button.success:not(:disabled):hover,
+button.neutral:not(:disabled):hover { background: var(--surface-tint-hover); }
+
+button.danger {
+  background: transparent;
+  border-color: rgba(185, 128, 128, 0.35);
+  color: var(--red);
+}
+button.danger:not(:disabled):hover { background: rgba(185, 128, 128, 0.1); }
+
+input[type="text"] {
+  width: 100%;
+  padding: 0.6rem 0.7rem;
+  font-size: 0.95rem;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  margin-top: 0.35rem;
+  color: var(--text);
+}
+input[type="text"]::placeholder { color: var(--placeholder); }
+input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+label.field {
+  display: block;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--muted-strong);
+  margin-bottom: 0.9rem;
+}
+
+label.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--muted-strong);
+  cursor: pointer;
+}
+
+#status {
+  min-height: 1.3em;
+  font-size: 0.92rem;
+  font-weight: 600;
+  margin: 0.75rem 0 0;
+}
+.status-muted { color: var(--muted); }
+.status-error { color: var(--red); }
+.status-ok { color: var(--green); }
+.status-warn { color: #f59e0b; }
+
+.pose-overlay {
+  text-align: center;
+  padding: 1rem 0.5rem 0;
+}
+.pose-overlay .pose-name {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.pose-overlay .pose-progress {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-top: 0.2rem;
+}
+.progress-bar {
+  height: 6px;
+  border-radius: 0;
+  background: var(--surface-tint-hover);
+  overflow: hidden;
+  margin-top: 0.6rem;
+}
+.progress-bar > div {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 0.65rem 0.4rem; border-bottom: 1px solid var(--border); font-size: 0.95rem; color: var(--text); }
+td { font-weight: 600; }
+th { color: var(--muted-strong); font-weight: 700; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; }
+
+.badge {
+  display: inline-block;
+  padding: 0.22rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  border: 1px solid transparent;
+}
+/* Attendance status is functional, not decorative -- unlike buttons/badges
+   elsewhere, Present/Absent get clear, saturated color so they scan at a
+   glance instead of blending into the muted palette. */
+.badge.Present { color: #34d399; background: rgba(52, 211, 153, 0.16); border-color: rgba(52, 211, 153, 0.45); }
+.badge.Absent { color: #f87171; background: rgba(248, 113, 113, 0.16); border-color: rgba(248, 113, 113, 0.45); }
+.badge.Pending { color: var(--muted-strong); background: var(--gray-bg); border-color: var(--border); }
+
+/* ── Processing overlay: 3D cube loader ──────────────────────────────────
+   Ported from a React/Tailwind reference component to plain CSS -- this
+   project has no build step, so the animation logic is kept but expressed
+   as ordinary keyframes/classes instead of styled-jsx + Tailwind utilities. */
+.loader-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.4rem;
+  /* Always dark regardless of the (now white) .card it sits over, so
+     re-assert light-on-dark text here rather than inheriting the card's
+     dark-on-white overrides. */
+  --muted: rgba(242, 242, 243, 0.55);
+  background: rgba(20, 20, 22, 0.82);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border-radius: var(--radius);
+}
+
+.cube-scene {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  perspective: 1000px;
+}
+
+.cube {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  animation: cube-spin 8s linear infinite;
+}
+
+.cube-core {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 22px;
+  height: 22px;
+  background: #fff;
+  border-radius: 50%;
+  filter: blur(5px);
+  box-shadow: 0 0 30px rgba(255, 255, 255, 0.75);
+  animation: cube-core-pulse 2s ease-in-out infinite;
+}
+
+.side-wrapper {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform-style: preserve-3d;
+}
+
+.side-wrapper.front  { transform: rotateY(0deg); }
+.side-wrapper.back   { transform: rotateY(180deg); }
+.side-wrapper.right  { transform: rotateY(90deg); }
+.side-wrapper.left   { transform: rotateY(-90deg); }
+.side-wrapper.top    { transform: rotateX(90deg); }
+.side-wrapper.bottom { transform: rotateX(-90deg); }
+
+.face {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 4px;
+  backdrop-filter: blur(2px);
+  animation: cube-face-breathe 3s ease-in-out infinite;
+}
+
+.face-a { background: rgba(34, 211, 238, 0.1); border: 2px solid rgba(34, 211, 238, 0.85); box-shadow: 0 0 15px rgba(34, 211, 238, 0.35); }
+.face-b { background: rgba(168, 85, 247, 0.1); border: 2px solid rgba(168, 85, 247, 0.85); box-shadow: 0 0 15px rgba(168, 85, 247, 0.35); }
+.face-c { background: rgba(99, 102, 241, 0.1); border: 2px solid rgba(99, 102, 241, 0.85); box-shadow: 0 0 15px rgba(99, 102, 241, 0.35); }
+
+.cube-shadow {
+  position: absolute;
+  bottom: -30px;
+  width: 70px;
+  height: 16px;
+  background: rgba(0, 0, 0, 0.5);
+  filter: blur(8px);
+  border-radius: 100%;
+  animation: cube-shadow-breathe 3s ease-in-out infinite;
+}
+
+.loader-text { text-align: center; }
+.loader-text h3 {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #67e8f9;
+}
+.loader-text p {
+  margin: 0.3rem 0 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+@keyframes cube-spin {
+  0% { transform: rotateX(0deg) rotateY(0deg); }
+  100% { transform: rotateX(360deg) rotateY(360deg); }
+}
+
+@keyframes cube-face-breathe {
+  0%, 100% { transform: translateZ(40px); opacity: 0.8; }
+  50% { transform: translateZ(67px); opacity: 0.4; }
+}
+
+@keyframes cube-core-pulse {
+  0%, 100% { transform: scale(0.8); opacity: 0.5; }
+  50% { transform: scale(1.2); opacity: 1; }
+}
+
+@keyframes cube-shadow-breathe {
+  0%, 100% { transform: scale(1); opacity: 0.4; }
+  50% { transform: scale(1.5); opacity: 0.2; }
+}

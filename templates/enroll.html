@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Add Student - Attendance Tracker</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <canvas id="kinetic-grid" data-theme="monochrome"></canvas>
+
+  <nav class="topnav">
+    <span class="brand">Attendance Tracker</span>
+    <a href="/">Mark Attendance</a>
+    <a href="/add-student" class="active">Add Student</a>
+  </nav>
+
+  <div class="page">
+    <div class="heading-center">
+      <span class="kicker">New Enrollment</span>
+      <h1>Add Student</h1>
+    </div>
+
+    <div class="state-area">
+    <div class="card" id="formCard">
+      <label class="field">
+        Student name
+        <input type="text" id="name" placeholder="e.g. Priya Kumar" autocomplete="off">
+      </label>
+      <label class="checkbox">
+        <input type="checkbox" id="glasses">
+        This student wears glasses (captures a second full set without them)
+      </label>
+      <div class="btns">
+        <button id="start" class="primary">Start enrollment</button>
+      </div>
+      <p class="hint">
+        {{ samples_to_capture }} photos across {{ poses|length }} poses (turn head, tilt chin) so the
+        recognizer has enough variety to tell this student apart from others.
+      </p>
+    </div>
+
+    <div class="card" id="captureCard" style="display:none">
+      <video id="video" autoplay playsinline></video>
+      <canvas id="canvas" class="frame" style="display:none"></canvas>
+      <div class="pose-overlay">
+        <div class="pose-name" id="poseName">Get ready</div>
+        <div class="pose-progress" id="poseProgress"></div>
+        <div class="progress-bar"><div id="progressFill" style="width:0%"></div></div>
+      </div>
+      <div class="btns">
+        <button id="ready" class="primary" style="display:none">Start</button>
+        <button id="cancel" class="danger">Cancel</button>
+      </div>
+      <p id="status" class="status-muted"></p>
+
+      <div id="loader" class="loader-overlay" style="display:none">
+        <div class="cube-scene">
+          <div class="cube">
+            <div class="cube-core"></div>
+            <div class="side-wrapper front"><div class="face face-a"></div></div>
+            <div class="side-wrapper back"><div class="face face-a"></div></div>
+            <div class="side-wrapper right"><div class="face face-b"></div></div>
+            <div class="side-wrapper left"><div class="face face-b"></div></div>
+            <div class="side-wrapper top"><div class="face face-c"></div></div>
+            <div class="side-wrapper bottom"><div class="face face-c"></div></div>
+          </div>
+          <div class="cube-shadow"></div>
+        </div>
+        <div class="loader-text">
+          <h3>Enrolling student</h3>
+          <p id="loaderSubtext">Uploading and aligning samples&hellip;</p>
+        </div>
+      </div>
+    </div>
+    </div>
+
+    <div id="resultCard"></div>
+
+    <div class="card results-card manage-card">
+      <h2>Enrolled Students</h2>
+      <div id="studentList">
+        {% if students %}
+        <table>
+          <tr><th>Name</th><th></th></tr>
+          {% for s in students %}
+          <tr data-id="{{ s.id }}">
+            <td>{{ s.name }}</td>
+            <td class="manage-actions">
+              <button class="neutral" onclick="addSamplesFor('{{ s.id }}', '{{ s.name }}')">Add samples</button>
+              <button class="danger" onclick="deleteStudent('{{ s.id }}', '{{ s.name }}')">Delete</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </table>
+        {% else %}
+        <p class="hint">No students enrolled yet.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+<script src="{{ url_for('static', filename='kinetic-grid.js') }}"></script>
+<script>
+const POSES = {{ poses|tojson }};
+const SAMPLES_PER_POSE = {{ samples_per_pose }};
+const CAPTURE_INTERVAL_MS = {{ capture_interval_ms }};
+const API_KEY = {{ api_key|tojson }};
+const API_HEADERS = { "Content-Type": "application/json", "X-API-Key": API_KEY };
+
+const formCard = document.getElementById("formCard");
+const captureCard = document.getElementById("captureCard");
+const resultCard = document.getElementById("resultCard");
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const poseNameEl = document.getElementById("poseName");
+const poseProgressEl = document.getElementById("poseProgress");
+const progressFill = document.getElementById("progressFill");
+const readyBtn = document.getElementById("ready");
+const cancelBtn = document.getElementById("cancel");
+const statusEl = document.getElementById("status");
+const loaderEl = document.getElementById("loader");
+const loaderSubtext = document.getElementById("loaderSubtext");
+
+let stream = null;
+let cancelled = false;
+
+function setStatus(text, kind) {
+  statusEl.textContent = text;
+  statusEl.className = kind === "error" ? "status-error" : kind === "ok" ? "status-ok" : "status-muted";
+}
+
+function showLoader(text) {
+  loaderSubtext.textContent = text;
+  loaderEl.style.display = "flex";
+}
+function hideLoader() {
+  loaderEl.style.display = "none";
+}
+
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+function waitForReady(headline) {
+  poseNameEl.textContent = `Up next: ${headline}`;
+  poseProgressEl.textContent = "";
+  readyBtn.style.display = "inline-block";
+  return new Promise(resolve => {
+    readyBtn.onclick = () => { readyBtn.style.display = "none"; resolve(); };
+  });
+}
+
+function captureFrame() {
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0);
+  return canvas.toDataURL("image/jpeg", 0.9);
+}
+
+async function runEnrollment(name, wearsGlasses) {
+  const phases = wearsGlasses
+    ? [
+        { prefix: "Keep your GLASSES ON - " },
+        { prefix: "Remove your glasses now - " },
+      ]
+    : [{ prefix: "" }];
+
+  const target = POSES.length * SAMPLES_PER_POSE * phases.length;
+  const images = [];
+
+  for (const phase of phases) {
+    if (cancelled) return null;
+    for (const pose of POSES) {
+      if (cancelled) return null;
+      const label = phase.prefix + pose;
+
+      // Wait for an explicit "Start" per pose instead of auto-advancing
+      // through every pose back to back, so there's time to get into
+      // position for each one before it starts capturing.
+      await waitForReady(label);
+      if (cancelled) return null;
+
+      poseNameEl.textContent = label;
+      for (let i = 0; i < SAMPLES_PER_POSE; i++) {
+        if (cancelled) return null;
+        images.push(captureFrame());
+        poseProgressEl.textContent = `Photo ${i + 1}/${SAMPLES_PER_POSE} for this pose · ${images.length}/${target} total`;
+        progressFill.style.width = `${Math.round((images.length / target) * 100)}%`;
+        await sleep(CAPTURE_INTERVAL_MS);
+      }
+    }
+  }
+  return images;
+}
+
+async function beginEnrollment({ name, studentId, wearsGlasses }) {
+  const isReEnroll = !!studentId;
+
+  formCard.style.display = "none";
+  captureCard.style.display = "block";
+  resultCard.innerHTML = "";
+  cancelled = false;
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    video.srcObject = stream;
+  } catch (err) {
+    setStatus("Could not access webcam: " + err.message, "error");
+    return;
+  }
+
+  const images = await runEnrollment(name, wearsGlasses);
+  if (cancelled || images === null) {
+    resetToForm();
+    return;
+  }
+
+  showLoader(isReEnroll ? `Adding samples for ${name}…` : "Uploading and aligning samples, updating the gallery…");
+
+  try {
+    const body = isReEnroll
+      ? { student_id: studentId, wears_glasses: wearsGlasses, images }
+      : { name, wears_glasses: wearsGlasses, images };
+    const resp = await fetch("/api/enroll", {
+      method: "POST",
+      headers: API_HEADERS,
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+
+    if (!resp.ok) {
+      setStatus(data.error || "Enrollment failed.", "error");
+      return;
+    }
+
+    captureCard.style.display = "none";
+    const headline = isReEnroll
+      ? `Added samples for "${data.name}"`
+      : `Enrolled "${data.name}" (id: ${data.student_id})`;
+    resultCard.innerHTML = `<div class="card">
+      <p class="status-ok" style="font-weight:700">${headline}</p>
+      <p class="hint">${data.captured} usable sample(s) saved${data.skipped ? `, ${data.skipped} frame(s) skipped (no face or multiple faces)` : ""}. Gallery updated.</p>
+      <div class="btns">
+        <button class="primary" onclick="location.reload()">${isReEnroll ? "Back to enrollment" : "Add another student"}</button>
+        <button class="neutral" type="button" onclick="location.href='/'">Go to Mark Attendance</button>
+      </div>
+    </div>`;
+  } catch (err) {
+    setStatus("Request failed: " + err.message, "error");
+  } finally {
+    hideLoader();
+    stopStream();
+  }
+}
+
+document.getElementById("start").onclick = () => {
+  const name = document.getElementById("name").value.trim();
+  if (!name) {
+    alert("Please enter the student's name.");
+    return;
+  }
+  const wearsGlasses = document.getElementById("glasses").checked;
+  beginEnrollment({ name, wearsGlasses });
+};
+
+function addSamplesFor(id, name) {
+  if (!confirm(`Capture more photos for "${name}"? This adds samples to their existing enrollment, not a new student.`)) {
+    return;
+  }
+  // Re-enrollment identifies the student by id (picked from the list), not
+  // a typed name -- skips the duplicate-face check entirely server-side,
+  // since who this is was already confirmed by selecting them.
+  beginEnrollment({ name, studentId: id, wearsGlasses: false });
+}
+
+function stopStream() {
+  if (stream) {
+    stream.getTracks().forEach(t => t.stop());
+    stream = null;
+  }
+}
+
+function resetToForm() {
+  stopStream();
+  captureCard.style.display = "none";
+  formCard.style.display = "block";
+  readyBtn.style.display = "none";
+  setStatus("");
+}
+
+cancelBtn.onclick = () => {
+  cancelled = true;
+  resetToForm();
+};
+
+async function deleteStudent(id, name) {
+  if (!confirm(`Delete "${name}"? This removes their photos and gallery samples permanently.`)) {
+    return;
+  }
+  try {
+    const resp = await fetch("/api/delete-student", {
+      method: "POST",
+      headers: API_HEADERS,
+      body: JSON.stringify({ student_id: id }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      alert(data.error || "Delete failed.");
+      return;
+    }
+    const row = document.querySelector(`#studentList tr[data-id="${id}"]`);
+    if (row) row.remove();
+  } catch (err) {
+    alert("Request failed: " + err.message);
+  }
+}
+</script>
+</body>
+</html>

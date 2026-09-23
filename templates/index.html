@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attendance Tracker</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <canvas id="kinetic-grid" data-theme="monochrome"></canvas>
+
+  <nav class="topnav">
+    <span class="brand">Attendance Tracker</span>
+    <a href="/" class="active">Mark Attendance</a>
+    <a href="/add-student">Add Student</a>
+  </nav>
+
+  <div class="kicker-row">
+    <span class="kicker"><span class="live-dot"></span>Live Camera</span>
+    <span id="clock" class="clock"></span>
+  </div>
+
+  <div class="page wide">
+    <h1>Mark Attendance</h1>
+
+    <div class="layout">
+      <div class="card">
+        <div class="video-wrap">
+          <video id="video" autoplay playsinline></video>
+          <canvas id="overlay" class="overlay-canvas"></canvas>
+        </div>
+        <canvas id="canvas" class="frame" style="display:none"></canvas>
+        <canvas id="detectCanvas" style="display:none"></canvas>
+
+        <div class="btns">
+          <button id="capture" class="neutral">Capture photo</button>
+          <button id="finish" class="primary">Finish &amp; mark attendance</button>
+          <button id="cancel" class="danger">Start over</button>
+        </div>
+        <div id="thumbs"></div>
+        <p id="status" class="status-muted"></p>
+
+        <div id="loader" class="loader-overlay" style="display:none">
+          <div class="cube-scene">
+            <div class="cube">
+              <div class="cube-core"></div>
+              <div class="side-wrapper front"><div class="face face-a"></div></div>
+              <div class="side-wrapper back"><div class="face face-a"></div></div>
+              <div class="side-wrapper right"><div class="face face-b"></div></div>
+              <div class="side-wrapper left"><div class="face face-b"></div></div>
+              <div class="side-wrapper top"><div class="face face-c"></div></div>
+              <div class="side-wrapper bottom"><div class="face face-c"></div></div>
+            </div>
+            <div class="cube-shadow"></div>
+          </div>
+          <div class="loader-text">
+            <h3>Marking attendance</h3>
+            <p id="loaderSubtext">Matching faces against the roster&hellip;</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card results-card">
+        <h2>Attendance</h2>
+        <div id="results">
+          {% if students %}
+          <table>
+            <tr><th>Name</th><th>Status</th></tr>
+            {% for name in students %}
+            <tr><td>{{ name }}</td><td><span class="badge Pending">Not marked</span></td></tr>
+            {% endfor %}
+          </table>
+          {% else %}
+          <p class="hint">No active students in dataset/. Add students first.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script src="{{ url_for('static', filename='kinetic-grid.js') }}"></script>
+<script>
+const STUDENTS = {{ students|tojson }};
+const API_KEY = {{ api_key|tojson }};
+const API_HEADERS = { "Content-Type": "application/json", "X-API-Key": API_KEY };
+
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const overlay = document.getElementById("overlay");
+const overlayCtx = overlay.getContext("2d");
+const detectCanvas = document.getElementById("detectCanvas");
+const thumbs = document.getElementById("thumbs");
+const statusEl = document.getElementById("status");
+const resultsEl = document.getElementById("results");
+const loaderEl = document.getElementById("loader");
+const loaderSubtext = document.getElementById("loaderSubtext");
+const clockEl = document.getElementById("clock");
+let captured = [];
+
+function tickClock() {
+  const now = new Date();
+  const datePart = now.toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
+  const timePart = now.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  clockEl.textContent = `${datePart}  ·  ${timePart}`;
+}
+tickClock();
+setInterval(tickClock, 1000);
+
+function pendingResultsHtml() {
+  if (STUDENTS.length === 0) {
+    return '<p class="hint">No active students in dataset/. Add students first.</p>';
+  }
+  const rows = STUDENTS.map(name =>
+    `<tr><td>${name}</td><td><span class="badge Pending">Not marked</span></td></tr>`
+  ).join("");
+  return `<table><tr><th>Name</th><th>Status</th></tr>${rows}</table>`;
+}
+
+function showLoader(text) {
+  loaderSubtext.textContent = text;
+  loaderEl.style.display = "flex";
+}
+function hideLoader() {
+  loaderEl.style.display = "none";
+}
+
+navigator.mediaDevices.getUserMedia({ video: true })
+  .then(stream => { video.srcObject = stream; })
+  .catch(err => { setStatus("Could not access webcam: " + err.message, "error"); });
+
+const DETECT_INTERVAL_MS = 400;
+let detecting = false;
+// Flask's dev server handles one request at a time -- a live-detect poll
+// in flight right as "Finish & mark attendance" fires would queue the
+// actual mark request behind it. Pausing the poll during that call keeps
+// it from adding avoidable latency to the thing that actually matters.
+let detectPaused = false;
+
+async function detectLoop() {
+  if (video.videoWidth && !detecting && !detectPaused) {
+    detecting = true;
+    if (overlay.width !== video.videoWidth || overlay.height !== video.videoHeight) {
+      overlay.width = video.videoWidth;
+      overlay.height = video.videoHeight;
+    }
+    detectCanvas.width = video.videoWidth;
+    detectCanvas.height = video.videoHeight;
+    detectCanvas.getContext("2d").drawImage(video, 0, 0);
+    const dataUrl = detectCanvas.toDataURL("image/jpeg", 0.6);
+
+    try {
+      const resp = await fetch("/api/detect", {
+        method: "POST",
+        headers: API_HEADERS,
+        body: JSON.stringify({ image: dataUrl }),
+      });
+      const data = await resp.json();
+      overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+      overlayCtx.lineWidth = Math.max(2, overlay.width / 220);
+      overlayCtx.strokeStyle = "#4ade80";
+      for (const f of data.faces || []) {
+        overlayCtx.strokeRect(f.x, f.y, f.w, f.h);
+      }
+    } catch (err) {
+      // transient network hiccup -- just skip this tick and try again
+    }
+    detecting = false;
+  }
+  setTimeout(detectLoop, DETECT_INTERVAL_MS);
+}
+detectLoop();
+
+const STATUS_CLASSES = { error: "status-error", ok: "status-ok", warn: "status-warn" };
+
+function setStatus(text, kind) {
+  statusEl.textContent = text;
+  statusEl.className = STATUS_CLASSES[kind] || "status-muted";
+}
+
+document.getElementById("capture").onclick = () => {
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0);
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+  captured.push(dataUrl);
+
+  const img = document.createElement("img");
+  img.src = dataUrl;
+  thumbs.appendChild(img);
+  setStatus(`Captured ${captured.length} photo(s).`);
+};
+
+document.getElementById("cancel").onclick = () => {
+  captured = [];
+  thumbs.innerHTML = "";
+  resultsEl.innerHTML = pendingResultsHtml();
+  setStatus("");
+};
+
+const finishBtn = document.getElementById("finish");
+
+finishBtn.onclick = async () => {
+  if (captured.length === 0) {
+    setStatus("Capture at least one photo first.", "error");
+    return;
+  }
+  finishBtn.disabled = true;
+  detectPaused = true;
+  setStatus("");
+  showLoader(`Matching ${captured.length} photo(s) against the roster…`);
+
+  try {
+    const resp = await fetch("/api/mark", {
+      method: "POST",
+      headers: API_HEADERS,
+      body: JSON.stringify({ images: captured }),
+    });
+    const data = await resp.json();
+
+    if (!resp.ok) {
+      setStatus(data.error || "Something went wrong.", "error");
+      return;
+    }
+
+    if (data.spoofed > 0) {
+      const attempt = data.spoofed === 1 ? "attempt" : "attempts";
+      setStatus(`⚠ Spoof ${attempt} blocked: a photo or screen was held up to the camera instead of a real face.`, "warn");
+    } else {
+      setStatus(`Done. ${data.banked} new sample(s) banked.`, "ok");
+    }
+
+    const rows = data.results.map(r =>
+      `<tr><td>${r.name}</td><td><span class="badge ${r.status}">${r.status}</span></td></tr>`
+    ).join("");
+    const photosHtml = (data.photos || []).filter(Boolean).map(url =>
+      `<img class="annotated-thumb" src="${url}">`
+    ).join("");
+
+    resultsEl.innerHTML = `
+      ${photosHtml ? `<div class="annotated-gallery">${photosHtml}</div>` : ""}
+      <table><tr><th>Name</th><th>Status</th></tr>${rows}</table>
+    `;
+
+    captured = [];
+    thumbs.innerHTML = "";
+  } catch (err) {
+    setStatus("Request failed: " + err.message, "error");
+  } finally {
+    hideLoader();
+    finishBtn.disabled = false;
+    detectPaused = false;
+  }
+};
+</script>
+</body>
+</html>
